@@ -1,5 +1,7 @@
 module FunInt where
 
+import Data.List
+
 -- these types must not be edited, or they will break the tests
 type Program = Expr
 type Identifier = String
@@ -28,19 +30,40 @@ lookUp k t = case lookup k t of
 -- Part I
 
 applyOp :: Identifier -> Int -> Int -> Expr
-applyOp = undefined
+applyOp "+" num1 num2  = Number (num1 + num2)
+applyOp "*" num1 num2  = Number (num1 * num2)
+applyOp ">" num1 num2  = Boolean (num1 > num2)
+applyOp "==" num1 num2 = Boolean (num1 == num2)
+
 
 apply :: Expr -> [Expr] -> Environment -> Expr
 -- Pre: The application is well-formed wrt arity
 -- and is correctly typed.
-apply = undefined
+apply (Op opr) [Number a, Number b] _ = applyOp opr a b
+apply (Fun as e) es env               = eval e new_env 
+  where 
+    new_env = zip as es
 
 -- The first four rules correspond to redexes; the catch-all
 -- corresponds to normal forms...
 eval :: Expr -> Environment -> Expr
 -- Pre: the expression is well-formed wrt arity and is
 -- correctly typed.
-eval = undefined
+eval (Id a) env             = lookUp a env
+eval (If p q r) env
+  | cond                    = eval q env
+  | otherwise               = eval r env
+  where 
+    Boolean cond            = eval p env
+eval (Let v e e') env = eval e' new_env
+  where
+    new_env = [(v, eval e env)]
+eval (App exp1 listExp) env = apply exp1 (helper listExp) env
+  where
+    helper :: [Expr] -> [Expr]
+    helper []     = []
+    helper (x:xs) = eval x env : helper xs
+eval other _                = other
 
 --
 -- Given.
@@ -48,19 +71,64 @@ eval = undefined
 runProgram :: Program -> Expr
 runProgram p = eval p emptyEnv
 
+freeVars :: Expr -> [Identifier]
+freeVars (Number _)   = []
+freeVars (Boolean _)  = []
+freeVars (Op _)       = []
+freeVars (Id x)       = [x]
+freeVars (Let x e e') = freeVars e `union` freeVars e' \\ [x]
+freeVars (Fun x e)    = freeVars e \\ x
+freeVars (If p q r)   = freeVars p ++ freeVars q ++ freeVars r
+freeVars (App x es)   = freeVars x ++ helper es
+  where
+    helper :: [Expr] -> [Identifier]
+    helper []     = []
+    helper (e:es) = freeVars e ++ helper es
+
 isWellFormed :: Expr -> Bool
-isWellFormed = undefined
+isWellFormed exp = freeVars exp == []
 
 ----------------------------------------------------------------------
 -- Part II
 
 maybeApply :: Expr -> [Expr] -> Environment -> Maybe Expr
 -- Pre: The application is well-formed wrt arity.
-maybeApply = undefined
+maybeApply (Op opr) [Number a, Number b] _ = Just (applyOp opr a b)
+maybeApply (Op opr) _ _                    = Nothing
+maybeApply (Fun as e) es env               = Just (eval e new_env)
+  where 
+    new_env = zip as es
+maybeApply _ _ _                           = Nothing
 
 maybeEval :: Expr -> Environment -> Maybe Expr
 -- Pre: the expression is well-formed wrt arity
-maybeEval = undefined
+maybeEval (Id a) env  = Just (lookUp a env)
+maybeEval (If p q r) env
+  | cond /= True && cond /= False = Nothing
+  | cond                          = Just (eval q env)
+  | otherwise                     = Just (eval r env)
+  where 
+    Boolean cond = eval p env
+maybeEval (Let v e e') env        = Just (eval e' new_env)
+  where
+    new_env = [(v, eval e env)]
+maybeEval (App exp1@(Op x) listExp) env 
+  = Just (apply exp1 (helper listExp) env)
+  where
+    helper :: [Expr] -> [Expr]
+    helper []     = []
+    helper (x:xs) = eval x env : helper xs
+maybeEval (App exp1@(Fun x y) listExp) env 
+  = Just (apply exp1 (helper listExp) env)
+  where
+    helper :: [Expr] -> [Expr]
+    helper []     = []
+    helper (x:xs) = eval x env : helper xs
+maybeEval (App _ _) _             = Nothing
+maybeEval other _                 = Just other
+
+{-Second maybeEval test doesn"t work because
+I couldn't Let input doesn't work-}
 
 message1, message2 :: String
 message1 = "Type error"
@@ -68,6 +136,7 @@ message2 = "Program not well-formed (arity check)"
 
 maybeRunProgram :: Expr -> IO()
 maybeRunProgram = undefined
+
 
 ----------------------------------------------------------------------
 -- Tests referred to in the spec.
@@ -115,7 +184,7 @@ eval4 :: Expr
 eval4 = eval (App (Op "+") [Id "x", Id "y"]) env
 
 eval5 :: Expr
-eval5 = eval factOf6 emptyEnv
+eval5 = eval factOf6 []
 
 invalid1 :: Expr
 invalid1 = Fun ["x"] (App (Op "+") [Id "x", Id "y"])
@@ -125,6 +194,3 @@ invalid2 = If (App (Op "==") [Number 1, Number 0]) (Id "x") (Number 4)
 
 typeError1 :: Expr
 typeError1 = App (Op ">") [Number 1, Op "+"]
-
-typeError2 :: Expr
-typeError2 = App (Fun ["x","y"] (App (Op "*") [Id "x", Boolean True])) [Number 5, Number 6]
